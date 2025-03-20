@@ -1,38 +1,26 @@
 #include <iostream>
-#include <map>
 #include <sstream>
-#include <string>
 
 using namespace std;
 
 class IntensitySegments
 {
 private:
-    // Map to store intensity segments: key = position, value = intensity
-    map<int, int> segment_intensity_;
-
-    /**
-     * Merges adjacent segments with the same intensity to simplify the segment map.
-     * This ensures no two consecutive segments have the same intensity value.
-     */
-    void mergeSegments()
+    struct Node
     {
-        auto it = segment_intensity_.begin();
-        int pre_amount = 0; // Track the intensity of the previous segment
-        while (it != segment_intensity_.end())
-        {
-            if (it->second == pre_amount)
-            {
-                // If current segment has the same intensity as the previous, remove it
-                it = segment_intensity_.erase(it);
-            }
-            else
-            {
-                // Update the previous intensity and move to the next segment
-                pre_amount = it->second;
-                ++it;
-            }
-        }
+        int position = 0;
+        int intensity = 0;
+        Node *next = nullptr;
+        Node(int position, int intensity) : position(position), intensity(intensity) {}
+    };
+    
+    Node *head = nullptr;
+
+    void DeleteNode(Node *pre, Node *target)
+    {
+        if (pre) pre->next = target->next;
+        else head = target->next;
+        delete target;
     }
 
 public:
@@ -45,210 +33,345 @@ public:
      */
     void add(int from, int to, int amount)
     {
-        if (amount == 0) // No change if amount is zero
+        if (amount == 0)
             return;
-
-        // If the map is empty, initialize with the given range
-        if (segment_intensity_.empty())
-        {
-            segment_intensity_[from] = amount;
-            segment_intensity_[to] = 0;
+        if (from >= to)
             return;
-        }
-
-        // Find the first segment that is greater than or equal to 'from'
-        auto it = segment_intensity_.lower_bound(from);
-        if (it->first == from)
+        // find the first segment that is greater than or equal to from
+        Node *cur = head;
+        Node *pre = nullptr;
+        while (cur)
         {
-            // If 'from' is exactly a key, update its intensity
-            it->second += amount;
-        }
-        else
-        {
-            if (it == segment_intensity_.begin())
+            if (cur->position < from)
             {
-                // If 'from' is before the first segment, add a new segment
-                segment_intensity_[from] = amount;
+                pre = cur;
+                cur = cur->next;
             }
-            else
+            else break;
+        }
+        if (cur) // cur >= from
+        {
+            if (cur->position == from)
             {
-                // Otherwise, add a new segment with intensity adjusted by the previous segment
-                segment_intensity_[from] = amount + (--it)->second;
+                int preIntensity = pre ? pre->intensity : 0;
+                Node *next = cur->next;
+                if (cur->intensity + amount == preIntensity)
+                {
+                    DeleteNode(pre, cur);
+                }
+                else
+                {
+                    cur->intensity += amount;
+                    pre = cur;
+                }
+                cur = next;
+            }
+            else // cur > from
+            {
+                if (pre)
+                {
+                    Node *node = new Node(from, amount + pre->intensity);
+                    pre->next = node;
+                    node->next = cur;
+                    pre = node;
+                }
+                else
+                {
+                    head = new Node(from, amount); // new head
+                    head->next = cur;
+                    pre = head;
+                }
+            }
+            // update all segments that are between from and to
+            while (cur)
+            {
+                if (cur->position < to)
+                {
+                    cur->intensity += amount;
+                    pre = cur;
+                    cur = cur->next;
+                }
+                else break;
+            }
+            // cur >= to; deal with the last segment
+            if (cur)
+            {
+                int preIntensity = pre ? pre->intensity : 0;
+                if (cur->position == to)
+                {
+                    if (preIntensity == cur->intensity)
+                        DeleteNode(pre, cur);
+                    // no need to update cur otherwise
+                }
+                else // cur > to
+                {
+                    int next_intensity = cur->next ? cur->next->intensity : 0;
+                    if (preIntensity + amount != next_intensity)
+                    {
+                        Node *node = new Node(to, pre ? pre->intensity : 0);
+                        node->next = cur;
+                        if (pre)
+                            pre->next = node;
+                        else
+                            head = node;
+                    }
+                    // no need to insert new node otherwise
+                }
+            }
+            else // new_end
+            {
+                Node *node = new Node(to, 0);
+                pre->next = node;
             }
         }
-
-        // Update all segments between 'from' and 'to'
-        it = segment_intensity_.find(from);
-        ++it;
-        while (it != segment_intensity_.end() && it->first < to)
+        else // from is the largest
         {
-            it->second += amount;
-            ++it;
+            if (amount != 0)
+            {
+                Node *node = new Node(from, amount);
+                Node *last = new Node(to, 0);
+                if (pre) pre->next = node;
+                else head = node;
+                node->next = last;
+            }
         }
-
-        // Handle the segment at 'to'
-        if (it == segment_intensity_.end())
-        {
-            // If 'to' is beyond the last segment, add a new segment with intensity 0
-            segment_intensity_[to] = 0;
-        }
-        else
-        {
-            if (it->first > to)
-                // If 'to' is not a key, add a new segment with the intensity of the previous segment
-                segment_intensity_[to] = prev(it)->second;
-        }
-
-        // Merge adjacent segments with the same intensity
-        mergeSegments();
     }
 
     /**
      * Sets the intensity of all segments between `from` and `to` to a specified amount.
-     * If the intensity amount is zero and the map is empty, no changes are made.
+     * If the intensity amount is zero, segments may be removed if they match the surrounding intensity.
      * @param {int} from - The start of the range (inclusive).
      * @param {int} to - The end of the range (exclusive).
      * @param {int} amount - The intensity value to set.
      */
     void set(int from, int to, int amount)
     {
-        // If the map is empty and amount is zero, do nothing
-        if (segment_intensity_.empty())
-        {
-            if (amount == 0)
-                return;
-            // Initialize with the given range
-            segment_intensity_[from] = amount;
-            segment_intensity_[to] = 0;
+        if (from >= to)
             return;
-        }
-
-        // Set the intensity at 'from'
-        segment_intensity_[from] = amount;
-
-        // Update all segments between 'from' and 'to'
-        auto it = segment_intensity_.find(from);
-        ++it;
-        int pre_amount = amount; // Track the intensity of the previous segment
-        while (it != segment_intensity_.end() && it->first < to)
+        // find the first segment that is greater than or equal to from
+        Node *cur = head;
+        Node *pre = nullptr;
+        while (cur)
         {
-            pre_amount = it->second;
-            it = segment_intensity_.erase(it); // Remove segments within the range
+            if (cur->position < from)
+            {
+                pre = cur;
+                cur = cur->next;
+            }
+            else
+                break;
         }
-
-        // Handle the segment at 'to'
-        if (it == segment_intensity_.end())
+        int preIntensity = pre ? pre->intensity : 0;
+        if (cur) // cur >= from
         {
-            // If 'to' is beyond the last segment, add a new segment with intensity 0
-            segment_intensity_[to] = 0;
+            if (cur->position == from)
+            {
+                Node *next = cur->next;
+                if (amount == preIntensity)
+                {
+                    DeleteNode(pre, cur);
+                }
+                else
+                {
+                    preIntensity = cur->intensity;
+                    cur->intensity = amount;
+                    pre = cur;
+                }
+                cur = next;
+            }
+            else // cur > from
+            {
+                if (preIntensity != amount)
+                {
+                    if (pre)
+                    {
+                        Node *node = new Node(from, amount);
+                        pre->next = node;
+                        node->next = cur;
+                        pre = node;
+                    }
+                    else
+                    {
+                        head = new Node(from, amount); // new head
+                        head->next = cur;
+                        pre = head;
+                    }
+                }
+                // no need to insert new node otherwise
+            }
+            // update all segments that are between from and to
+            while (cur)
+            {
+                if (cur->position < to)
+                {
+                    Node *next = cur->next;
+                    DeleteNode(pre, cur);
+                    cur = next;
+                    preIntensity = cur ? cur->intensity : 0;
+                }
+                else
+                    break;
+            }
+            // cur >= to; deal with the last segment
+            if (cur)
+            {
+                if (cur->position == to)
+                {
+                    if (amount == cur->intensity)
+                        DeleteNode(pre, cur);
+                    // no need to update cur otherwise
+                }
+                else // cur > to
+                {
+                    if (preIntensity != amount)
+                    {
+                        Node *node = new Node(to, preIntensity);
+                        node->next = cur;
+                        if (pre)
+                            pre->next = node;
+                        else
+                            head = node;
+                    }
+                    // no need to insert new node otherwise
+                }
+            }
+            else // new_end
+            {
+                if (amount != 0)
+                {
+                    Node *node = new Node(to, 0);
+                    pre->next = node;
+                }
+            }
         }
-        else
+        else // from is the largest
         {
-            if (it->first > to)
-                // If 'to' is not a key, add a new segment with the intensity of the previous segment
-                segment_intensity_[to] = pre_amount;
+            if (amount != 0)
+            {
+                Node *node = new Node(from, amount);
+                Node *last = new Node(to, 0);
+                node->next = last;
+                if (pre)
+                    pre->next = node;
+                else
+                    head = node;
+            }
         }
-
-        // Merge adjacent segments with the same intensity
-        mergeSegments();
     }
 
     /**
-     * Converts the intensity segments to a string representation.
-     * The format is a list of segments, where each segment is represented as [position, intensity].
-     * @return {string} - The string representation of the intensity segments.
+     * Converts the current state of the intensity segments to a string representation.
+     * @return {std::string} - A string representation of the intensity segments.
      */
-    string toString()
+    std::string toString()
     {
-        stringstream ss;
+        std::stringstream ss;
         ss << "[";
-        for (auto it = segment_intensity_.begin(); it != segment_intensity_.end(); ++it)
+        Node *node = head;
+        while (node)
         {
-            if (it != segment_intensity_.begin()) {
-                ss << ",";
-            }
-            ss << "[" << it->first << "," << it->second << "]";
+            ss << "[" << node->position << "," << node->intensity << "]";
+            if (node->next) ss << ",";
+            node = node->next;
         }
         ss << "]";
-
-        string res = ss.str();
-        cout << res << endl; // Print the result for debugging
-        return res;
+        return ss.str();
     }
 };
 
-int main()
-{
+int main() {
     // Test cases to demonstrate functionality
     IntensitySegments segments;
     cout << "==================" << endl;
-    segments.toString(); // Should be "[]"
+    cout << "Actual re: " << segments.toString() << endl; // Should be "[]"
+    cout << "Should be: " << "[]" << endl;
     cout << "==================" << endl;
     segments.add(10, 30, 1);
-    segments.toString(); // Should be: "[[10,1],[30,0]]"
+    cout << "Actual re: " << segments.toString() << endl; // Should be: "[[10,1],[30,0]]"
+    cout << "Should be: " << "[[10,1],[30,0]]" << endl;
     cout << "==================" << endl;
     segments.add(20, 40, 1);
-    segments.toString(); // Should be: "[[10,1],[20,2],[30,1],[40,0]]"
+    cout << "Actual re: " << segments.toString() << endl; // Should be: "[[10,1],[20,2],[30,1],[40,0]]"
+    cout << "Should be: " << "[[10,1],[20,2],[30,1],[40,0]]" << endl;
     cout << "==================" << endl;
     segments.add(10, 40, -1);
-    segments.toString(); // Should be "[[20,1],[30,0]]"
+    cout << "Actual re: " << segments.toString() << endl; // Should be "[[20,1],[30,0]]"
+    cout << "Should be: " << "[[20,1],[30,0]]" << endl;
     cout << "==================" << endl;
     segments.add(10, 40, -1);
-    segments.toString(); // Should be "[[10,-1],[20,0],[30,-1],[40,0]]"
+    cout << "Actual re: " << segments.toString() << endl; // Should be "[[10,-1],[20,0],[30,-1],[40,0]]"
+    cout << "Should be: " << "[[10,-1],[20,0],[30,-1],[40,0]]" << endl;
 
     IntensitySegments segments1;
     cout << "==================" << endl;
-    segments1.toString(); // "[]"
+    cout << "Actual re: " << segments1.toString() << endl; // "[]"
+    cout << "Should be: " << "[]" << endl;
     cout << "==================" << endl;
     segments1.add(10, 30, 1);
-    segments1.toString(); // "[[10,1],[30,0]]"
+    cout << "Actual re: " << segments1.toString() << endl; // "[[10,1],[30,0]]"
+    cout << "Should be: " << "[[10,1],[30,0]]" << endl;
     cout << "==================" << endl;
     segments1.add(20, 40, 1);
-    segments1.toString(); // "[[10,1],[20,2],[30,1],[40,0]]"
+    cout << "Actual re: " << segments1.toString() << endl; // "[[10,1],[20,2],[30,1],[40,0]]"
+    cout << "Should be: " << "[[10,1],[20,2],[30,1],[40,0]]" << endl;
     cout << "==================" << endl;
     segments1.add(10, 40, -2);
-    segments1.toString(); // "[[10,-1],[20,0],[30,-1],[40,0]]"
+    cout << "Actual re: " << segments1.toString() << endl; // "[[10,-1],[20,0],[30,-1],[40,0]]"
+    cout << "Should be: " << "[[10,-1],[20,0],[30,-1],[40,0]]" << endl;
     cout << "==================" << endl;
     segments1.set(10, 40, 1);
-    segments1.toString(); // "[[10,1],[40,0]]"
+    cout << "Actual re: " << segments1.toString() << endl; // "[[10,1],[40,0]]"
+    cout << "Should be: " << "[[10,1],[40,0]]" << endl;
     cout << "==================" << endl;
     segments1.set(10, 40, 1);
-    segments1.toString(); // "[[10,1],[40,0]]"
+    cout << "Actual re: " << segments1.toString() << endl; // "[[10,1],[40,0]]"
+    cout << "Should be: " << "[[10,1],[40,0]]" << endl;
 
     IntensitySegments segments2;
     cout << "==================" << endl;
-    segments2.toString(); // "[]"
+    cout << "Actual re: " << segments2.toString() << endl; // "[]"
+    cout << "Should be: " << "[]" << endl;
     cout << "==================" << endl;
     segments2.add(10, 30, 1);
-    segments2.toString(); // "[[10,1],[30,0]]"
+    cout << "Actual re: " << segments2.toString() << endl; // "[[10,1],[30,0]]"
+    cout << "Should be: " << "[[10,1],[30,0]]" << endl;
     cout << "==================" << endl;
     segments2.add(20, 40, 1);
-    segments2.toString(); // "[[10,1],[20,2],[30,1],[40,0]]"
+    cout << "Actual re: " << segments2.toString() << endl; // "[[10,1],[20,2],[30,1],[40,0]]"
+    cout << "Should be: " << "[[10,1],[20,2],[30,1],[40,0]]" << endl;
     cout << "==================" << endl;
     segments2.add(10, 40, -1);
-    segments2.toString(); // "[[20,1],[30,0]]"
+    cout << "Actual re: " << segments2.toString() << endl; // "[[20,1],[30,0]]"
+    cout << "Should be: " << "[[20,1],[30,0]]" << endl;
     cout << "==================" << endl;
     segments2.add(10, 40, -1);
-    segments2.toString(); // "[[10,-1],[20,0],[30,-1],[40,0]]"
+    cout << "Actual re: " << segments2.toString() << endl; // "[[10,-1],[20,0],[30,-1],[40,0]]"
+    cout << "Should be: " << "[[10,-1],[20,0],[30,-1],[40,0]]" << endl;
 
     cout << "==================" << endl;
     segments2.set(20, 30, 1);
-    segments2.toString(); // "[[10,-1],[20,1],[30,-1],[40,0]]"
+    cout << "Actual re: " << segments2.toString() << endl; // "[[10,-1],[20,1],[30,-1],[40,0]]"
+    cout << "Should be: " << "[[10,-1],[20,1],[30,-1],[40,0]]" << endl;
     cout << "==================" << endl;
     segments2.set(20, 30, 1);
-    segments2.toString(); // "[[10,-1],[20,1],[30,-1],[40,0]]"
+    cout << "Actual re: " << segments2.toString() << endl; // "[[10,-1],[20,1],[30,-1],[40,0]]"
+    cout << "Should be: " << "[[10,-1],[20,1],[30,-1],[40,0]]" << endl;
 
     cout << "==================" << endl;
     segments2.set(0, 100, 0);
-    segments2.toString(); // "[]"
+    cout << "Actual re: " << segments2.toString() << endl; // "[]"
+    cout << "Should be: " << "[]" << endl;
 
     cout << "1111111111" << endl;
     IntensitySegments segments3;
-    segments3.toString(); // "[]"
+    cout << "Actual re: " << segments3.toString() << endl; // "[]"
+    cout << "Should be: " << "[]" << endl;
     segments3.set(0, 100, 0);
-    segments3.toString(); // "[]"
+    cout << "Actual re: " << segments3.toString() << endl; // "[]"
+    cout << "Should be: " << "[]" << endl;
     segments3.add(0, 100, 0);
-    segments3.toString(); // "[]"
+    cout << "Actual re: " << segments3.toString() << endl; // "[]"
+    cout << "Should be: " << "[]" << endl;
 
     cin.get();
     return 0;
